@@ -19,11 +19,23 @@ Player NDI dedicado para Debian, pensado para uso em igrejas e ambientes de exib
 - `src/ndiplayer.cpp` → player principal
 - `src/ndiplayer_setup.cpp` → setup interativo
 - `systemd/ndiplayer.service` → serviço systemd
+- `install.sh` → instalador
+- `uninstall.sh` → desinstalador
 
 ## Dependências
+
+O projeto depende do SDK oficial da NDI instalado localmente.
+
+Exemplo de caminho usado durante o desenvolvimento:
+
+- Include: `/home/audio_asus/NDI SDK for Linux/include`
+- Lib: `/home/audio_asus/NDI SDK for Linux/lib/x86_64-linux-gnu`
+
+## Instalação
 
 No Debian:
 
 ```bash
-sudo apt update
-sudo apt install -y build-essential git cmake libsdl2-dev libsdl2-ttf-dev libasound2-dev
+git clone https://github.com/LiveToDie-BR/ndiplayer.git
+cd ndiplayer
+sudo bash install.sh
