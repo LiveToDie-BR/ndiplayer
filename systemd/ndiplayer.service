@@ -1,0 +1,17 @@
+[Unit]
+Description=NDI Player
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=audio_asus
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+WorkingDirectory=/home/audio_asus
+ExecStart=/usr/local/bin/ndiplayer
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target
