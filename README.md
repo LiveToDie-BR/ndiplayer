@@ -39,3 +39,9 @@ No Debian:
 git clone https://github.com/LiveToDie-BR/ndiplayer.git
 cd ndiplayer
 sudo bash install.sh
+## Web UI
+
+Depois da instalação, a interface web pode ser acessada por:
+
+```bash
+http://NOME-DA-MAQUINA.local:8080

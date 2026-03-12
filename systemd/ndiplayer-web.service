@@ -1,0 +1,15 @@
+[Unit]
+Description=NDI Player Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ndiplayer/webui
+ExecStart=/usr/bin/python3 /opt/ndiplayer/webui/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

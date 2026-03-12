@@ -1,0 +1,10 @@
+ndiplayer
+ndiplayer_setup
+ndiplayer-scan-sources
+*.o
+*.out
+*.log
+*.swp
+*.tmp
+/build/
+dist/
