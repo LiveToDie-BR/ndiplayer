@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/ndiplayer/webui
-ExecStart=/usr/bin/python3 /opt/ndiplayer/webui/app.py
+WorkingDirectory=/opt/ndiplayer-web
+ExecStart=/usr/bin/python3 /opt/ndiplayer-web/app.py
 Restart=always
 RestartSec=3
 
