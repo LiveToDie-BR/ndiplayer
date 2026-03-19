@@ -219,6 +219,24 @@ install_app_files() {
   chmod +x "${APP_DIR}/ndiplayer_setup" 2>/dev/null || true
   chmod +x "${APP_DIR}/uninstall.sh" 2>/dev/null || true
 
+  cat > /usr/local/bin/ndiplayer <<'EOF'
+#!/usr/bin/env bash
+
+case "$1" in
+  uninstall)
+    sudo /opt/ndiplayer/uninstall.sh
+    ;;
+  *)
+    echo "NDI Player CLI"
+    echo ""
+    echo "Uso:"
+    echo "  ndiplayer uninstall"
+    ;;
+esac
+EOF
+
+  chmod +x /usr/local/bin/ndiplayer
+
   ok "Arquivos instalados em ${APP_DIR}"
 }
 
@@ -290,9 +308,11 @@ final_validation() {
   systemctl is-enabled ndiplayer.service >/dev/null && ok "ndiplayer.service habilitado."
   systemctl is-enabled ndiplayer-web.service >/dev/null && ok "ndiplayer-web.service habilitado."
 
-  systemctl is-active ndiplayer.service >/dev/null \
-    && ok "ndiplayer.service em execução." \
-    || warn "ndiplayer.service não está ativo."
+  if systemctl is-active ndiplayer.service >/dev/null; then
+    ok "ndiplayer.service em execução."
+  else
+    ok "ndiplayer.service instalado e pronto para ser iniciado pela Web UI."
+  fi
 
   systemctl is-active ndiplayer-web.service >/dev/null \
     && ok "ndiplayer-web.service em execução." \
