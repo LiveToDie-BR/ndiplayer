@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERSION="${NDIPLAYER_VERSION:-v1.2.2}"
+REPO="LiveToDie-BR/ndiplayer"
+BASE_URL="https://raw.githubusercontent.com/${REPO}/${VERSION}"
+
+TMP_DIR="$(mktemp -d)"
 APP_DIR="/opt/ndiplayer"
 CONFIG_FILE="/etc/ndiplayer.conf"
 SERVICE_PLAYER="/etc/systemd/system/ndiplayer.service"
@@ -13,6 +17,11 @@ USER_HOME="$(eval echo "~${CURRENT_USER}")"
 USER_UID="$(id -u "${CURRENT_USER}")"
 ARCH="$(uname -m)"
 
+cleanup() {
+  rm -rf "${TMP_DIR}"
+}
+trap cleanup EXIT
+
 log()  { echo "[INFO] $*"; }
 ok()   { echo "[OK]   $*"; }
 warn() { echo "[WARN] $*"; }
@@ -20,7 +29,8 @@ err()  { echo "[ERRO] $*" >&2; }
 
 require_sudo() {
   if [[ "$EUID" -ne 0 ]]; then
-    err "Execute com sudo: sudo ./install.sh"
+    err "Execute assim:"
+    echo "curl -fsSL ${BASE_URL}/install.sh | sudo bash"
     exit 1
   fi
 }
@@ -37,6 +47,7 @@ install_system_dependencies() {
   log "Instalando dependências do sistema..."
   apt update
   apt install -y \
+    curl \
     git \
     rsync \
     ffmpeg \
@@ -51,6 +62,29 @@ install_system_dependencies() {
     libavutil-dev \
     libswscale-dev
   ok "Dependências do sistema instaladas."
+}
+
+download_runtime_files() {
+  log "Baixando arquivos do NDI Player ${VERSION}..."
+  mkdir -p "${TMP_DIR}/webui/static" "${TMP_DIR}/webui/templates"
+
+  curl -fsSL "${BASE_URL}/ndiplayer" -o "${TMP_DIR}/ndiplayer"
+  curl -fsSL "${BASE_URL}/ndiplayer-scan-sources" -o "${TMP_DIR}/ndiplayer-scan-sources"
+  curl -fsSL "${BASE_URL}/ndiplayer-setup" -o "${TMP_DIR}/ndiplayer-setup" || true
+  curl -fsSL "${BASE_URL}/ndiplayer_setup" -o "${TMP_DIR}/ndiplayer_setup" || true
+  curl -fsSL "${BASE_URL}/uninstall.sh" -o "${TMP_DIR}/uninstall.sh"
+  curl -fsSL "${BASE_URL}/webui/app.py" -o "${TMP_DIR}/webui/app.py"
+  curl -fsSL "${BASE_URL}/webui/requirements.txt" -o "${TMP_DIR}/webui/requirements.txt"
+  curl -fsSL "${BASE_URL}/webui/static/style.css" -o "${TMP_DIR}/webui/static/style.css"
+  curl -fsSL "${BASE_URL}/webui/templates/index.html" -o "${TMP_DIR}/webui/templates/index.html"
+
+  chmod +x "${TMP_DIR}/ndiplayer" 2>/dev/null || true
+  chmod +x "${TMP_DIR}/ndiplayer-scan-sources" 2>/dev/null || true
+  chmod +x "${TMP_DIR}/ndiplayer-setup" 2>/dev/null || true
+  chmod +x "${TMP_DIR}/ndiplayer_setup" 2>/dev/null || true
+  chmod +x "${TMP_DIR}/uninstall.sh" 2>/dev/null || true
+
+  ok "Arquivos baixados."
 }
 
 find_ndi_sdk_dir() {
@@ -119,7 +153,7 @@ install_ndi_sdk() {
     echo "  - Install_NDI_SDK_v*_Linux.tar.gz"
     echo "  - pasta 'NDI SDK for Linux'"
     echo
-    echo "Depois execute novamente: sudo ./install.sh"
+    echo "Depois execute novamente o instalador."
     exit 1
   }
 
@@ -152,10 +186,10 @@ install_ndi_sdk() {
 }
 
 install_python_requirements() {
-  if [[ -f "${PROJECT_DIR}/requirements.txt" ]]; then
+  if [[ -f "${TMP_DIR}/webui/requirements.txt" ]]; then
     log "Instalando dependências Python..."
-    python3 -m pip install --break-system-packages -r "${PROJECT_DIR}/requirements.txt" || \
-    python3 -m pip install -r "${PROJECT_DIR}/requirements.txt"
+    python3 -m pip install --break-system-packages -r "${TMP_DIR}/webui/requirements.txt" || \
+    python3 -m pip install -r "${TMP_DIR}/webui/requirements.txt"
     ok "Dependências Python instaladas."
   fi
 }
@@ -170,24 +204,22 @@ install_app_files() {
   mkdir -p "${APP_DIR}"
   mkdir -p "${APP_DIR}/webui"
 
-  log "Copiando apenas os arquivos necessários..."
-  cp -av "${PROJECT_DIR}/ndiplayer" "${APP_DIR}/"
-  cp -av "${PROJECT_DIR}/ndiplayer-scan-sources" "${APP_DIR}/"
-  cp -av "${PROJECT_DIR}/ndiplayer-setup" "${APP_DIR}/" 2>/dev/null || true
-  cp -av "${PROJECT_DIR}/ndiplayer_setup" "${APP_DIR}/" 2>/dev/null || true
-  cp -av "${PROJECT_DIR}/install.sh" "${APP_DIR}/"
-  cp -av "${PROJECT_DIR}/uninstall.sh" "${APP_DIR}/"
-  cp -av "${PROJECT_DIR}/webui/." "${APP_DIR}/webui/"
+  log "Instalando runtime..."
+  cp -av "${TMP_DIR}/ndiplayer" "${APP_DIR}/"
+  cp -av "${TMP_DIR}/ndiplayer-scan-sources" "${APP_DIR}/"
+  cp -av "${TMP_DIR}/ndiplayer-setup" "${APP_DIR}/" 2>/dev/null || true
+  cp -av "${TMP_DIR}/ndiplayer_setup" "${APP_DIR}/" 2>/dev/null || true
+  cp -av "${TMP_DIR}/uninstall.sh" "${APP_DIR}/"
+  cp -av "${TMP_DIR}/webui/." "${APP_DIR}/webui/"
 
   chown -R "${CURRENT_USER}:${CURRENT_USER}" "${APP_DIR}"
   chmod +x "${APP_DIR}/ndiplayer" 2>/dev/null || true
   chmod +x "${APP_DIR}/ndiplayer-scan-sources" 2>/dev/null || true
   chmod +x "${APP_DIR}/ndiplayer-setup" 2>/dev/null || true
   chmod +x "${APP_DIR}/ndiplayer_setup" 2>/dev/null || true
-  chmod +x "${APP_DIR}/install.sh" 2>/dev/null || true
   chmod +x "${APP_DIR}/uninstall.sh" 2>/dev/null || true
 
-  ok "Arquivos copiados para ${APP_DIR}"
+  ok "Arquivos instalados em ${APP_DIR}"
 }
 
 install_default_config() {
@@ -271,6 +303,7 @@ main() {
   require_sudo
   detect_os
   install_system_dependencies
+  download_runtime_files
   install_ndi_sdk
   install_python_requirements
   install_app_files
