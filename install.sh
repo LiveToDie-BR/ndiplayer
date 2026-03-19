@@ -313,7 +313,7 @@ main() {
 
   echo
   ok "Instalação concluída."
-  echo "Web UI: http://IP_DO_HOST:5000"
+  echo "Web UI: http://IP_DO_HOST:8080"
 }
 
 main "$@"
