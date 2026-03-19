@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>NDI Player Web UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="5">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>NDI Player Web UI</h1>
+
+    <div class="card">
+      <h2>Status</h2>
+      <p><strong>Servico ndiplayer:</strong> {{ service_status }}</p>
+      <p><strong>Source atual:</strong> {{ config.SOURCE_NAME or '(nao definida)' }}</p>
+      <p><strong>Audio atual:</strong> {{ config.AUDIO_DEVICE or '(nao definido)' }}</p>
+
+      <div class="buttons">
+        <form method="post" action="{{ url_for('start_player') }}">
+          <button type="submit">Iniciar Player</button>
+        </form>
+        <form method="post" action="{{ url_for('stop_player') }}">
+          <button type="submit" class="secondary">Parar Player</button>
+        </form>
+        <form method="post" action="{{ url_for('restart_player') }}">
+          <button type="submit" class="warning">Reiniciar Player</button>
+        </form>
+      </div>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="card">
+          <h2>Mensagens</h2>
+          {% for msg in messages %}
+            <p>{{ msg }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>Configuração</h2>
+      <form method="post" action="{{ url_for('save') }}">
+        <label for="source_name">Source NDI</label>
+        <select name="source_name" id="source_name">
+          <option value="">-- selecione --</option>
+          {% for source in ndi_sources %}
+            <option value="{{ source }}" {% if source == config.SOURCE_NAME %}selected{% endif %}>
+              {{ source }}
+            </option>
+          {% endfor %}
+        </select>
+
+        <label for="audio_device">Saída de áudio</label>
+        <select name="audio_device" id="audio_device">
+          <option value="">-- selecione --</option>
+          {% for dev in audio_devices %}
+            <option value="{{ dev.alsa_device }}" {% if dev.alsa_device == config.AUDIO_DEVICE %}selected{% endif %}>
+              {{ dev.label }} -> {{ dev.alsa_device }}
+            </option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">Salvar configuração</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Sources NDI detectadas</h2>
+      {% if ndi_sources %}
+        <ul>
+          {% for source in ndi_sources %}
+            <li>{{ source }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>Nenhuma source encontrada.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Saídas de áudio detectadas</h2>
+      {% if audio_devices %}
+        <ul>
+          {% for dev in audio_devices %}
+            <li>{{ dev.label }} -> {{ dev.alsa_device }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>Nenhuma saída de áudio encontrada.</p>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>
