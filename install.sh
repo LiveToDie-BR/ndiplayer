@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${NDIPLAYER_VERSION:-v1.2.2}"
+VERSION="${NDIPLAYER_VERSION:-v1.2.3}"
 REPO="LiveToDie-BR/ndiplayer"
 BASE_URL="https://raw.githubusercontent.com/${REPO}/${VERSION}"
 
