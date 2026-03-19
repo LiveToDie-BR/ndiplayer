@@ -1,29 +1,16 @@
 # NDI Player
 
-Decoder NDI simples para Linux.
-
-Projeto criado para transformar um Mini PC com Debian em um decoder NDI dedicado, ideal para igrejas, eventos e broadcast.
-
-## Recursos
-
-- Debian 12 minimal
-- Funcionamento sem interface gráfica
-- Saída HDMI
-- Áudio ALSA
-- Descoberta automática de fontes NDI
-- Interface Web para controle
-- Serviços systemd
-- Web UI em porta 8080
-
-## Requisito obrigatório
-
-Antes de instalar, é necessário baixar e instalar o NDI SDK oficial:
-
-https://ndi.video/for-developers/ndi-sdk/
+Player NDI para Linux com instalação simplificada, Web UI e execução via systemd.
 
 ## Instalação
 
+Antes de instalar, tenha o SDK oficial da NDI para Linux disponível na HOME do usuário. O instalador procura automaticamente por um destes itens:
+
+- `Install_NDI_SDK_v*_Linux.sh`
+- `Install_NDI_SDK_v*_Linux.tar.gz`
+- pasta `NDI SDK for Linux`
+
+Depois, execute:
+
 ```bash
-git clone https://github.com/LiveToDie-BR/ndiplayer.git
-cd ndiplayer
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/LiveToDie-BR/ndiplayer/v1.2.3/install.sh | sudo bash
