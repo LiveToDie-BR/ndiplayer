@@ -1,188 +1,286 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="/opt/ndiplayer"
+CONFIG_FILE="/etc/ndiplayer.conf"
+SERVICE_PLAYER="/etc/systemd/system/ndiplayer.service"
+SERVICE_WEB="/etc/systemd/system/ndiplayer-web.service"
+LD_CONF="/etc/ld.so.conf.d/ndiplayer-ndi.conf"
 
-echo
-echo "========================================"
-echo " NDI Player Installer"
-echo "========================================"
+CURRENT_USER="${SUDO_USER:-$USER}"
+USER_HOME="$(eval echo "~${CURRENT_USER}")"
+USER_UID="$(id -u "${CURRENT_USER}")"
+ARCH="$(uname -m)"
 
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Execute com sudo:"
-  echo "  sudo bash install.sh"
-  exit 1
-fi
+log()  { echo "[INFO] $*"; }
+ok()   { echo "[OK]   $*"; }
+warn() { echo "[WARN] $*"; }
+err()  { echo "[ERRO] $*" >&2; }
 
-PROJECT_DIR="$(pwd)"
-INSTALL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
-
-echo
-echo "[1/10] Instalando dependencias..."
-
-apt update
-
-apt install -y \
-build-essential \
-cmake \
-libsdl2-dev \
-libasound2-dev \
-python3 \
-python3-pip \
-git \
-avahi-daemon \
-avahi-utils
-
-echo
-echo "[2/10] Ativando mDNS (Avahi)..."
-
-systemctl enable avahi-daemon
-systemctl start avahi-daemon
-
-echo
-echo "[3/10] Instalando Flask..."
-
-pip3 install -r webui/requirements.txt --break-system-packages
-
-echo
-echo "[4/10] Procurando SDK NDI..."
-
-if [ -n "${NDI_INCLUDE_DIR:-}" ] && [ -n "${NDI_LIB_DIR:-}" ]; then
-    echo "Usando caminhos informados manualmente."
-else
-    NDI_HEADER="$(find /home -type f -name Processing.NDI.Lib.h 2>/dev/null | head -n 1 || true)"
-    NDI_LIB_FILE="$(find /home -type f \( -name 'libndi.so' -o -name 'libndi.so.6' -o -name 'libndi.so.*' \) 2>/dev/null | grep x86_64-linux-gnu | head -n 1 || true)"
-
-    if [ -n "$NDI_HEADER" ]; then
-        NDI_INCLUDE_DIR="$(dirname "$NDI_HEADER")"
-    fi
-
-    if [ -n "$NDI_LIB_FILE" ]; then
-        NDI_LIB_DIR="$(dirname "$NDI_LIB_FILE")"
-    fi
-fi
-
-if [ -z "${NDI_INCLUDE_DIR:-}" ] || [ ! -f "$NDI_INCLUDE_DIR/Processing.NDI.Lib.h" ]; then
-    echo
-    echo "ERRO: Header do SDK NDI nao encontrado."
-    echo
-    echo "Instale o NDI SDK oficial:"
-    echo "https://ndi.video/for-developers/ndi-sdk/"
-    echo
-    echo "Ou informe manualmente:"
-    echo "sudo env NDI_INCLUDE_DIR=\"/caminho/include\" NDI_LIB_DIR=\"/caminho/lib\" bash install.sh"
+require_sudo() {
+  if [[ "$EUID" -ne 0 ]]; then
+    err "Execute com sudo: sudo ./install.sh"
     exit 1
-fi
+  fi
+}
 
-if [ -z "${NDI_LIB_DIR:-}" ] || { [ ! -f "$NDI_LIB_DIR/libndi.so" ] && [ ! -f "$NDI_LIB_DIR/libndi.so.6" ] && ! ls "$NDI_LIB_DIR"/libndi.so.* >/dev/null 2>&1; }; then
-    echo
-    echo "ERRO: Biblioteca NDI nao encontrada."
-    echo
-    echo "Instale o NDI SDK oficial."
-    echo
-    echo "Ou informe manualmente:"
-    echo "sudo env NDI_INCLUDE_DIR=\"/caminho/include\" NDI_LIB_DIR=\"/caminho/lib\" bash install.sh"
+detect_os() {
+  if [[ ! -f /etc/debian_version ]]; then
+    err "Este instalador foi preparado para Debian/Ubuntu."
     exit 1
-fi
+  fi
+  ok "Sistema compatível detectado."
+}
 
-echo
-echo "NDI detectado:"
-echo "Include: $NDI_INCLUDE_DIR"
-echo "Lib:     $NDI_LIB_DIR"
+install_system_dependencies() {
+  log "Instalando dependências do sistema..."
+  apt update
+  apt install -y \
+    git \
+    rsync \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    python3-flask \
+    build-essential \
+    pkg-config \
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev
+  ok "Dependências do sistema instaladas."
+}
 
-echo
-echo "[5/10] Compilando ndiplayer..."
+find_ndi_sdk_dir() {
+  if [[ -d "${USER_HOME}/NDI SDK for Linux" ]]; then
+    echo "${USER_HOME}/NDI SDK for Linux"
+    return 0
+  fi
 
-g++ src/ndiplayer.cpp -o ndiplayer \
-  -I"$NDI_INCLUDE_DIR" \
-  -L"$NDI_LIB_DIR" \
-  -lndi \
-  -lSDL2 \
-  -lasound \
-  -lpthread \
-  -O3
+  local sdk_sh=""
+  sdk_sh="$(find "${USER_HOME}" -maxdepth 1 -type f -name 'Install_NDI_SDK_v*_Linux.sh' | head -n 1 || true)"
+  if [[ -n "${sdk_sh}" ]]; then
+    log "Executando extrator do SDK NDI..."
+    chmod +x "${sdk_sh}"
+    su - "${CURRENT_USER}" -c "\"${sdk_sh}\"" || true
+    if [[ -d "${USER_HOME}/NDI SDK for Linux" ]]; then
+      echo "${USER_HOME}/NDI SDK for Linux"
+      return 0
+    fi
+  fi
 
-echo
-echo "[6/10] Compilando ndiplayer-setup..."
+  local sdk_tgz=""
+  sdk_tgz="$(find "${USER_HOME}" -maxdepth 1 -type f -name 'Install_NDI_SDK_v*_Linux.tar.gz' | head -n 1 || true)"
+  if [[ -n "${sdk_tgz}" ]]; then
+    log "Extraindo pacote do SDK NDI..."
+    su - "${CURRENT_USER}" -c "tar -xf \"${sdk_tgz}\" -C \"${USER_HOME}\""
+    local extracted_sh=""
+    extracted_sh="$(find "${USER_HOME}" -maxdepth 1 -type f -name 'Install_NDI_SDK_v*_Linux.sh' | head -n 1 || true)"
+    if [[ -n "${extracted_sh}" ]]; then
+      chmod +x "${extracted_sh}"
+      su - "${CURRENT_USER}" -c "\"${extracted_sh}\"" || true
+    fi
+    if [[ -d "${USER_HOME}/NDI SDK for Linux" ]]; then
+      echo "${USER_HOME}/NDI SDK for Linux"
+      return 0
+    fi
+  fi
 
-g++ src/ndiplayer_setup.cpp -o ndiplayer-setup \
-  -I"$NDI_INCLUDE_DIR" \
-  -L"$NDI_LIB_DIR" \
-  -lndi \
-  -O2
+  return 1
+}
 
-echo
-echo "[7/10] Compilando ndiplayer-scan-sources..."
+get_ndi_arch_dir() {
+  case "${ARCH}" in
+    x86_64) echo "x86_64-linux-gnu" ;;
+    i686|i386) echo "i686-linux-gnu" ;;
+    aarch64|arm64) echo "aarch64-rpi4-linux-gnueabi" ;;
+    armv7l) echo "arm-rpi4-linux-gnueabihf" ;;
+    *)
+      err "Arquitetura não suportada automaticamente: ${ARCH}"
+      exit 1
+      ;;
+  esac
+}
 
-g++ src/ndiplayer_scan_sources.cpp -o ndiplayer-scan-sources \
-  -I"$NDI_INCLUDE_DIR" \
-  -L"$NDI_LIB_DIR" \
-  -lndi \
-  -O2
+install_ndi_sdk() {
+  if ldconfig -p | grep -q libndi; then
+    ok "SDK NDI já está instalado."
+    return 0
+  fi
 
-echo
-echo "[8/10] Instalando binarios..."
+  local sdk_dir=""
+  sdk_dir="$(find_ndi_sdk_dir)" || {
+    err "NDI SDK não encontrado."
+    echo
+    echo "Baixe o SDK oficial da NDI para Linux e coloque na HOME do usuário um destes itens:"
+    echo "  - Install_NDI_SDK_v*_Linux.sh"
+    echo "  - Install_NDI_SDK_v*_Linux.tar.gz"
+    echo "  - pasta 'NDI SDK for Linux'"
+    echo
+    echo "Depois execute novamente: sudo ./install.sh"
+    exit 1
+  }
 
-systemctl stop ndiplayer.service >/dev/null 2>&1 || true
-systemctl stop ndiplayer-web.service >/dev/null 2>&1 || true
+  local ndi_arch_dir=""
+  ndi_arch_dir="$(get_ndi_arch_dir)"
 
-cp ndiplayer /usr/local/bin/
-cp ndiplayer-setup /usr/local/bin/
-cp ndiplayer-scan-sources /usr/local/bin/
+  [[ -d "${sdk_dir}/lib/${ndi_arch_dir}" ]] || {
+    err "Pasta de libs do SDK não encontrada para ${ndi_arch_dir}"
+    exit 1
+  }
 
-chmod +x /usr/local/bin/ndiplayer
-chmod +x /usr/local/bin/ndiplayer-setup
-chmod +x /usr/local/bin/ndiplayer-scan-sources
+  log "Instalando SDK NDI para ${ndi_arch_dir}..."
+  cp -av "${sdk_dir}/lib/${ndi_arch_dir}"/libndi.so* /usr/local/lib/
+  cp -av "${sdk_dir}/include"/Processing.NDI.* /usr/local/include/
 
-echo
-echo "Registrando biblioteca NDI no linker..."
+  if [[ -d "${sdk_dir}/bin/${ndi_arch_dir}" ]]; then
+    cp -av "${sdk_dir}/bin/${ndi_arch_dir}/"* /usr/local/bin/ || true
+    chmod 755 /usr/local/bin/ndi-* 2>/dev/null || true
+  fi
 
-echo "$NDI_LIB_DIR" > /etc/ld.so.conf.d/ndiplayer-ndi.conf
-ldconfig
+  echo "/usr/local/lib" > "${LD_CONF}"
+  ldconfig
 
-echo
-echo "[9/10] Instalando Web UI..."
+  ldconfig -p | grep -q libndi || {
+    err "Falha ao registrar libndi no sistema."
+    exit 1
+  }
 
-mkdir -p /opt/ndiplayer-web
-mkdir -p /opt/ndiplayer-web/templates
-mkdir -p /opt/ndiplayer-web/static
+  ok "SDK NDI instalado com sucesso."
+}
 
-cp webui/app.py /opt/ndiplayer-web/
-cp webui/templates/index.html /opt/ndiplayer-web/templates/
-cp webui/static/style.css /opt/ndiplayer-web/static/
+install_python_requirements() {
+  if [[ -f "${PROJECT_DIR}/requirements.txt" ]]; then
+    log "Instalando dependências Python..."
+    python3 -m pip install --break-system-packages -r "${PROJECT_DIR}/requirements.txt" || \
+    python3 -m pip install -r "${PROJECT_DIR}/requirements.txt"
+    ok "Dependências Python instaladas."
+  fi
+}
 
-echo
-echo "[10/10] Instalando services..."
+install_app_files() {
+  log "Parando serviços antes de atualizar arquivos..."
+  systemctl stop ndiplayer.service 2>/dev/null || true
+  systemctl stop ndiplayer-web.service 2>/dev/null || true
 
-sed "s|__NDIPLAYER_USER__|$INSTALL_USER|g" systemd/ndiplayer.service > /etc/systemd/system/ndiplayer.service
-cp systemd/ndiplayer-web.service /etc/systemd/system/
+  log "Limpando diretório da aplicação..."
+  rm -rf "${APP_DIR}"
+  mkdir -p "${APP_DIR}"
+  mkdir -p "${APP_DIR}/webui"
 
-systemctl daemon-reload
+  log "Copiando apenas os arquivos necessários..."
+  cp -av "${PROJECT_DIR}/ndiplayer" "${APP_DIR}/"
+  cp -av "${PROJECT_DIR}/ndiplayer-scan-sources" "${APP_DIR}/"
+  cp -av "${PROJECT_DIR}/ndiplayer-setup" "${APP_DIR}/" 2>/dev/null || true
+  cp -av "${PROJECT_DIR}/ndiplayer_setup" "${APP_DIR}/" 2>/dev/null || true
+  cp -av "${PROJECT_DIR}/install.sh" "${APP_DIR}/"
+  cp -av "${PROJECT_DIR}/uninstall.sh" "${APP_DIR}/"
+  cp -av "${PROJECT_DIR}/webui/." "${APP_DIR}/webui/"
 
-systemctl enable ndiplayer.service
-systemctl enable ndiplayer-web.service
+  chown -R "${CURRENT_USER}:${CURRENT_USER}" "${APP_DIR}"
+  chmod +x "${APP_DIR}/ndiplayer" 2>/dev/null || true
+  chmod +x "${APP_DIR}/ndiplayer-scan-sources" 2>/dev/null || true
+  chmod +x "${APP_DIR}/ndiplayer-setup" 2>/dev/null || true
+  chmod +x "${APP_DIR}/ndiplayer_setup" 2>/dev/null || true
+  chmod +x "${APP_DIR}/install.sh" 2>/dev/null || true
+  chmod +x "${APP_DIR}/uninstall.sh" 2>/dev/null || true
 
-systemctl restart ndiplayer-web.service
+  ok "Arquivos copiados para ${APP_DIR}"
+}
 
-echo
-echo "========================================"
-echo " Instalacao concluida!"
-echo "========================================"
+install_default_config() {
+  if [[ ! -f "${CONFIG_FILE}" ]]; then
+    cat > "${CONFIG_FILE}" <<EOF
+NDI_SOURCE=""
+EOF
+    ok "Arquivo de configuração criado em ${CONFIG_FILE}"
+  else
+    warn "Config existente preservada: ${CONFIG_FILE}"
+  fi
+}
 
-echo
-echo "Usuario detectado para o player: $INSTALL_USER"
+install_services() {
+  log "Instalando serviços systemd..."
 
-echo
-echo "Configure o decoder com:"
-echo "  sudo ndiplayer-setup"
+  cat > "${SERVICE_PLAYER}" <<EOF
+[Unit]
+Description=NDI Player
+After=network-online.target
+Wants=network-online.target
 
-echo
-echo "Depois inicie o player:"
-echo "  sudo systemctl start ndiplayer.service"
+[Service]
+Type=simple
+User=${CURRENT_USER}
+WorkingDirectory=${APP_DIR}
+Environment=HOME=${USER_HOME}
+Environment=XDG_RUNTIME_DIR=/run/user/${USER_UID}
+ExecStart=${APP_DIR}/ndiplayer
+Restart=always
+RestartSec=3
 
-echo
-echo "Web UI:"
-echo "  http://IP_DO_DECODER:8080"
+[Install]
+WantedBy=multi-user.target
+EOF
 
-echo
-echo "Teste de descoberta NDI:"
-echo "  ndiplayer-scan-sources"
+  cat > "${SERVICE_WEB}" <<EOF
+[Unit]
+Description=NDI Player Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${APP_DIR}
+ExecStart=/usr/bin/python3 ${APP_DIR}/webui/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable ndiplayer.service
+  systemctl enable ndiplayer-web.service
+  systemctl restart ndiplayer.service
+  systemctl restart ndiplayer-web.service
+
+  ok "Serviços instalados e reiniciados."
+}
+
+final_validation() {
+  log "Executando validação final..."
+
+  ldconfig -p | grep -q libndi && ok "libndi registrada."
+  systemctl is-enabled ndiplayer.service >/dev/null && ok "ndiplayer.service habilitado."
+  systemctl is-enabled ndiplayer-web.service >/dev/null && ok "ndiplayer-web.service habilitado."
+
+  systemctl is-active ndiplayer.service >/dev/null \
+    && ok "ndiplayer.service em execução." \
+    || warn "ndiplayer.service não está ativo."
+
+  systemctl is-active ndiplayer-web.service >/dev/null \
+    && ok "ndiplayer-web.service em execução." \
+    || warn "ndiplayer-web.service não está ativo."
+}
+
+main() {
+  require_sudo
+  detect_os
+  install_system_dependencies
+  install_ndi_sdk
+  install_python_requirements
+  install_app_files
+  install_default_config
+  install_services
+  final_validation
+
+  echo
+  ok "Instalação concluída."
+  echo "Web UI: http://IP_DO_HOST:5000"
+}
+
+main "$@"

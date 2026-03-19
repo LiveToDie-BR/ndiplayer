@@ -1,29 +1,47 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-echo "========================================"
-echo " NDI Player Uninstall"
-echo "========================================"
+APP_DIR="/opt/ndiplayer"
+CONFIG_FILE="/etc/ndiplayer.conf"
+SERVICE_PLAYER="/etc/systemd/system/ndiplayer.service"
+SERVICE_WEB="/etc/systemd/system/ndiplayer-web.service"
+LD_CONF="/etc/ld.so.conf.d/ndiplayer-ndi.conf"
 
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Este script precisa ser executado com sudo."
-  echo "Use: sudo bash uninstall.sh"
+log()  { echo "[INFO] $*"; }
+ok()   { echo "[OK]   $*"; }
+warn() { echo "[WARN] $*"; }
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "Execute com sudo: sudo ./uninstall.sh"
   exit 1
 fi
 
-systemctl stop ndiplayer.service >/dev/null 2>&1 || true
-systemctl disable ndiplayer.service >/dev/null 2>&1 || true
+log "Parando serviços..."
+systemctl stop ndiplayer.service 2>/dev/null || true
+systemctl stop ndiplayer-web.service 2>/dev/null || true
+systemctl disable ndiplayer.service 2>/dev/null || true
+systemctl disable ndiplayer-web.service 2>/dev/null || true
 
-rm -f /usr/local/bin/ndiplayer
-rm -f /usr/local/bin/ndiplayer-setup
-rm -f /etc/systemd/system/ndiplayer.service
-
+log "Removendo serviços..."
+rm -f "${SERVICE_PLAYER}"
+rm -f "${SERVICE_WEB}"
 systemctl daemon-reload
+systemctl reset-failed || true
 
-echo
-echo "Arquivos removidos."
-echo
-echo "Se desejar, remova tambem a configuracao manualmente:"
-echo "  sudo rm -f /etc/ndiplayer.conf"
-echo
-echo "Desinstalacao concluida."
+log "Removendo arquivos do projeto..."
+rm -rf "${APP_DIR}"
+rm -f "${CONFIG_FILE}"
+
+log "Removendo SDK NDI instalado manualmente..."
+rm -f /usr/local/lib/libndi.so*
+rm -f /usr/local/include/Processing.NDI.*
+rm -f /usr/local/bin/ndi-*
+rm -f /usr/local/bin/libndi.so*
+rm -f "${LD_CONF}"
+ldconfig
+
+log "Removendo caches e logs..."
+rm -rf /var/log/ndiplayer
+rm -rf /tmp/ndiplayer*
+
+ok "Desinstalação concluída."
